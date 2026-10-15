@@ -13,6 +13,7 @@ import {
   stripAnsiSequences,
   type ColorInput,
   type KeyEvent,
+  type MouseEvent,
   type PasteEvent,
   type TextareaRenderable,
 } from "@opentui/core"
@@ -20,6 +21,7 @@ import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { normalizePromptContent } from "../prompt/content"
 import { deduplicatePromptImages, promptAttachmentLabel } from "../prompt/attachment"
 import { resolvePastedAttachments } from "../component/prompt/local-attachment"
+import { writeClipboardImageToTemp } from "../component/prompt/image-temp"
 import { createTuiClipboard, type OwnedClipboardService } from "../clipboard"
 import type { ClipboardService } from "../context/clipboard"
 import fuzzysort from "fuzzysort"
@@ -150,6 +152,8 @@ export type PromptState = {
   offset: Accessor<number>
   rows: Accessor<number>
   images: Accessor<ReadonlyArray<{ uri: string }>>
+  expandImageByAttachmentIndex: (index: number) => boolean
+  handlePillClick: () => boolean
   layout: Accessor<ReturnType<typeof footerPromptLayout>>
   requestExit: () => boolean
   onSubmit: () => void
@@ -217,6 +221,8 @@ export function RunPromptBody(props: {
   onKeyDown: (event: KeyEvent) => void
   onPaste: (event: PasteEvent) => Promise<void>
   images: Accessor<ReadonlyArray<{ uri: string }>>
+  expandImageByAttachmentIndex: (index: number) => boolean
+  handlePillClick: () => boolean
   layout: Accessor<ReturnType<typeof footerPromptLayout>>
   onContentChange: () => void
   onSizeChange: () => void
@@ -285,7 +291,16 @@ export function RunPromptBody(props: {
               {(image, index) => {
                 const [failed, setFailed] = createSignal(false)
                 return (
-                  <box width={props.layout().images * 2} height="100%" flexShrink={1}>
+                  <box
+                    width={props.layout().images * 2}
+                    height="100%"
+                    flexShrink={1}
+                    onMouseUp={(event: MouseEvent) => {
+                      if (event.button !== 0) return
+                      event.stopPropagation()
+                      props.expandImageByAttachmentIndex(index())
+                    }}
+                  >
                     <Show when={!failed()} fallback={<text fg={props.theme().muted}>No preview</text>}>
                       <image
                         id={`mini-prompt-image-${index()}`}
@@ -302,9 +317,20 @@ export function RunPromptBody(props: {
               }}
             </For>
             <Show when={props.images().length > 3}>
-              <text fg={props.theme().muted} wrapMode="none" truncate>
-                +{props.images().length - 3} more
-              </text>
+              <box
+                flexShrink={1}
+                alignItems="center"
+                justifyContent="center"
+                onMouseUp={(event: MouseEvent) => {
+                  if (event.button !== 0) return
+                  event.stopPropagation()
+                  props.expandImageByAttachmentIndex(3)
+                }}
+              >
+                <text fg={props.theme().muted} wrapMode="none" truncate>
+                  +{props.images().length - 3} more
+                </text>
+              </box>
             </Show>
           </box>
         </Show>
@@ -327,6 +353,13 @@ export function RunPromptBody(props: {
             void props.onPaste(event).finally(refreshPasteLayout)
           }}
           onContentChange={props.onContentChange}
+          onMouseDown={(event: MouseEvent) => {
+            if (event.button !== 0) return
+            if (props.handlePillClick()) {
+              event.preventDefault()
+              event.stopPropagation()
+            }
+          }}
           ref={(next) => {
             area = next
           }}
@@ -369,6 +402,9 @@ export function createPromptState(input: PromptInput): PromptState {
   let type = 0
   let parts: Mention[] = []
   let marks = new Map<number, number>()
+  // Maps extmarkId to the filesystem path for clipboard-pasted images written
+  // to temp files, so clicking the pill can unwrap to the path.
+  const imageTempPaths = new Map<number, string>()
   const [draftParts, setDraftParts] = createSignal<RunPromptPart[]>([])
   const attachments = createMemo(() =>
     draftParts().flatMap((part) =>
@@ -670,6 +706,7 @@ export function createPromptState(input: PromptInput): PromptState {
     }
     parts = []
     marks = new Map()
+    imageTempPaths.clear()
     setDraftParts([])
   }
 
@@ -698,6 +735,10 @@ export function createPromptState(input: PromptInput): PromptState {
         typeId: type,
       })
       marks.set(id, idx)
+      // Re-seed image temp path tracking from the file URL.
+      if (item.type === "file" && item.url.startsWith("data:image/")) {
+        imageTempPaths.set(id, item.url)
+      }
     })
   }
 
@@ -835,7 +876,7 @@ export function createPromptState(input: PromptInput): PromptState {
         }
   }
 
-  const pasteAttachment = (file: { uri: string; filename?: string }) => {
+  const pasteAttachment = (file: { uri: string; filename?: string; path?: string }) => {
     if (!area || area.isDestroyed) return
     syncDraft()
     const value = promptAttachmentLabel(attachments(), { uri: file.uri, name: file.filename })
@@ -843,6 +884,17 @@ export function createPromptState(input: PromptInput): PromptState {
     const end = area.cursorOffset - 1
     const start = end - measure(value)
     const id = area.extmarks.create({ start, end, virtual: true, typeId: type })
+
+    // Track image attachments so the pill can unwrap to a path on click.
+    // For file-path pastes, store the original path directly.
+    // For clipboard images (data URIs), store a marker — the temp file is
+    // written lazily on click so restore paths don't lose the mapping.
+    if (file.uri.startsWith("data:image/")) {
+      imageTempPaths.set(id, file.path ?? file.uri)
+    } else if (file.path) {
+      imageTempPaths.set(id, file.path)
+    }
+
     marks.set(id, parts.length)
     parts.push({
       type: "file",
@@ -914,6 +966,62 @@ export function createPromptState(input: PromptInput): PromptState {
   const onPaste = (event: PasteEvent) => {
     event.preventDefault()
     return paste(event.bytes.length ? decodePasteBytes(event.bytes) : undefined)
+  }
+
+  // Returns true if a pill at the current cursor was expanded (image to path).
+  const handlePillClick = () => {
+    if (!area || area.isDestroyed || type === 0) return false
+    const extmark = area.extmarks
+      .getAtOffset(area.cursorOffset)
+      .find((item) => imageTempPaths.has(item.id))
+    if (!extmark) return false
+    return expandImageAttachment(extmark.id)
+  }
+
+  function expandImageAttachment(extmarkId: number) {
+    if (!area || area.isDestroyed || type === 0) return false
+    const stored = imageTempPaths.get(extmarkId)
+    if (!stored) return false
+    const idx = marks.get(extmarkId)
+    if (idx === undefined) return false
+    const part = parts[idx]
+    if (!part || part.type !== "file") return false
+
+    const extmarks = area.extmarks.getAllForTypeId(type)
+    const extmark = extmarks.find((item) => item.id === extmarkId)
+    if (!extmark) return false
+
+    // For clipboard images, the stored value is the data URI — write to temp
+    // lazily on click. For file-path pastes, it's already a filesystem path.
+    const filepath = stored.startsWith("data:image/")
+      ? writeClipboardImageToTemp(stored)
+      : stored
+    if (!filepath) return false
+
+    area.extmarks.delete(extmarkId)
+    imageTempPaths.delete(extmarkId)
+    marks.delete(extmarkId)
+    parts = parts.filter((_, i) => i !== idx)
+    for (const [id, i] of marks) {
+      if (i > idx) marks.set(id, i - 1)
+    }
+    area.setSelection(extmark.start, extmark.end)
+    area.insertText(filepath)
+    syncDraft()
+    scheduleRows()
+    return true
+  }
+
+  function expandImageByAttachmentIndex(attachmentIndex: number) {
+    const attachment = images()[attachmentIndex]
+    if (!attachment) return false
+    for (const [id, idx] of marks) {
+      if (!imageTempPaths.has(id)) continue
+      const part = parts[idx]
+      if (part?.type !== "file" || part.url !== attachment.uri) continue
+      if (expandImageAttachment(id)) return true
+    }
+    return false
   }
 
   const push = (value: RunPrompt) => {
@@ -1524,6 +1632,8 @@ export function createPromptState(input: PromptInput): PromptState {
     offset: menu.offset,
     rows: menu.rows,
     images,
+    expandImageByAttachmentIndex,
+    handlePillClick,
     layout,
     requestExit,
     onSubmit: () => onSubmit(),
