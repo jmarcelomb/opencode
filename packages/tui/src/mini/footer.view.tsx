@@ -770,6 +770,8 @@ export function RunFooterView(props: RunFooterViewProps) {
                             onKeyDown={composer.onKeyDown}
                             onPaste={composer.onPaste}
                             images={composer.images}
+                            expandImageByAttachmentIndex={composer.expandImageByAttachmentIndex}
+                            handlePillClick={composer.handlePillClick}
                             layout={composer.layout}
                             onContentChange={composer.onContentChange}
                             onSizeChange={composer.onSizeChange}

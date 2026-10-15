@@ -51,6 +51,7 @@ import { DialogSkill } from "../dialog-skill"
 import { useConfig } from "../../config"
 import { usePromptMove } from "./move"
 import { promptFilesForServer, resolvePastedAttachments } from "./local-attachment"
+import { writeClipboardImageToTemp } from "./image-temp"
 import { locationKey, useData } from "../../context/data"
 import { useLocation } from "../../context/location"
 import { useArgs } from "../../context/args"
@@ -371,6 +372,10 @@ export function Prompt(props: PromptProps) {
   })
   let disposed = false
   let pasteQueue = Promise.resolve()
+  // Maps extmarkId to the filesystem path for clipboard-pasted images written
+  // to temp files, so clicking the pill can unwrap to the path instead of the
+  // inline data URI.
+  const imageTempPaths = new Map<number, string>()
 
   function enqueuePaste(run: (changed: () => boolean) => Promise<void>) {
     pasteQueue = pasteQueue
@@ -706,6 +711,7 @@ export function Prompt(props: PromptProps) {
 
   function resetComposer() {
     input.extmarks.clear()
+    imageTempPaths.clear()
     setStore("prompt", emptyPrompt())
     setStore("extmarkToPart", new Map())
     input.clear()
@@ -763,6 +769,7 @@ export function Prompt(props: PromptProps) {
 
   function restoreExtmarksFromPrompt(prompt: PromptInfo) {
     input.extmarks.clear()
+    imageTempPaths.clear()
     setStore("extmarkToPart", new Map())
 
     const parts = [
@@ -770,25 +777,30 @@ export function Prompt(props: PromptProps) {
         mention: part.mention,
         ref: { type: "file" as const, index },
         styleId: fileStyleId,
+        // Re-seed image temp path tracking from the file URI.
+        imagePath: part.uri.startsWith("data:image/") ? (part.uri as string) : undefined,
       })),
       ...(prompt.agents ?? []).map((part, index) => ({
         mention: part.mention,
         ref: { type: "agent" as const, index },
         styleId: agentStyleId,
+        imagePath: undefined,
       })),
       ...(prompt.skills ?? []).map((part, index) => ({
         mention: part.mention,
         ref: { type: "skill" as const, index },
         styleId: skillStyleId,
+        imagePath: undefined,
       })),
       ...prompt.pasted.map((part, index) => ({
         mention: part.source,
         ref: { type: "pasted" as const, index },
         styleId: pasteStyleId,
+        imagePath: undefined,
       })),
     ]
 
-    parts.forEach(({ mention, ref, styleId }) => {
+    parts.forEach(({ mention, ref, styleId, imagePath }) => {
       if (mention?.text) {
         const extmarkId = input.extmarks.create({
           start: mention.start,
@@ -797,6 +809,7 @@ export function Prompt(props: PromptProps) {
           styleId,
           typeId: promptPartTypeId,
         })
+        if (imagePath) imageTempPaths.set(extmarkId, imagePath)
         setStore("extmarkToPart", (map: Map<number, PromptPartRef>) => {
           const newMap = new Map(map)
           newMap.set(extmarkId, ref)
@@ -1443,6 +1456,50 @@ export function Prompt(props: PromptProps) {
     return true
   }
 
+  function expandImageAttachment(extmarkId: number) {
+    const extmark = input.extmarks.get(extmarkId)
+    const ref = store.extmarkToPart.get(extmarkId)
+    if (!extmark || ref?.type !== "file") return false
+    const stored = imageTempPaths.get(extmarkId)
+    if (!stored) return false
+    // For clipboard images, the stored value is the data URI — write to temp
+    // lazily on click. For file-path pastes, it's already a filesystem path.
+    const filepath = stored.startsWith("data:image/")
+      ? writeClipboardImageToTemp(stored)
+      : stored
+    if (!filepath) return false
+
+    input.extmarks.delete(extmarkId)
+    imageTempPaths.delete(extmarkId)
+    setStore(
+      produce((draft) => {
+        draft.extmarkToPart.delete(extmarkId)
+        if (!draft.prompt.files) return
+        draft.prompt.files.splice(ref.index, 1)
+        for (const [id, r] of draft.extmarkToPart) {
+          if (r.type === "file" && r.index > ref.index) {
+            draft.extmarkToPart.set(id, { type: "file", index: r.index - 1 })
+          }
+        }
+      }),
+    )
+    input.setSelection(extmark.start, extmark.end)
+    input.insertText(filepath)
+    return true
+  }
+
+  function expandImageByAttachmentIndex(attachmentIndex: number) {
+    const attachment = imageAttachments()[attachmentIndex]
+    if (!attachment) return false
+    for (const [id, ref] of store.extmarkToPart) {
+      if (ref.type !== "file" || !imageTempPaths.has(id)) continue
+      const file = store.prompt.files?.[ref.index]
+      if (file?.uri !== attachment.uri) continue
+      if (expandImageAttachment(id)) return true
+    }
+    return false
+  }
+
   async function pasteInputText(text: string, changed: () => boolean) {
     const normalizedText = stripAnsiSequences(text).replace(/\r\n?/g, "\n")
     const pastedContent = normalizedText.trim()
@@ -1499,6 +1556,17 @@ export function Prompt(props: PromptProps) {
       styleId: pasteStyleId,
       typeId: promptPartTypeId,
     })
+
+    // Track image attachments so the pill can unwrap to a path on click.
+    // For file-path pastes, store the original path directly.
+    // For clipboard images (data URIs), store a marker — the temp file is
+    // written lazily on click so restore paths don't lose the mapping.
+    const isClipboardImage = file.uri.startsWith("data:image/")
+    if (isClipboardImage) {
+      imageTempPaths.set(extmarkId, file.path ?? file.uri)
+    } else if (file.path) {
+      imageTempPaths.set(extmarkId, file.path)
+    }
 
     const part: NonNullable<PromptInfo["files"]>[number] = {
       uri: file.uri,
@@ -1719,7 +1787,7 @@ export function Prompt(props: PromptProps) {
                         onMouseUp={(event: MouseEvent) => {
                           if (event.button !== 0) return
                           event.stopPropagation()
-                          openImagePreview(index())
+                          expandImageByAttachmentIndex(index())
                         }}
                       >
                         <Show
@@ -1755,7 +1823,7 @@ export function Prompt(props: PromptProps) {
                     onMouseUp={(event: MouseEvent) => {
                       if (event.button !== 0) return
                       event.stopPropagation()
-                      openImagePreview(visibleImageAttachments().length)
+                      expandImageByAttachmentIndex(visibleImageAttachments().length)
                     }}
                   >
                     <text fg={theme.text.muted} wrapMode="none" truncate>
@@ -1844,8 +1912,19 @@ export function Prompt(props: PromptProps) {
                 r.target?.focus()
                 const extmark = input.extmarks
                   .getAtOffset(input.cursorOffset)
-                  .find((item) => store.extmarkToPart.get(item.id)?.type === "pasted")
-                if (!extmark || !expandPastedText(extmark.id)) return
+                  .find((item) => {
+                    const ref = store.extmarkToPart.get(item.id)
+                    if (ref?.type === "pasted") return true
+                    if (ref?.type === "file" && imageTempPaths.has(item.id)) return true
+                    return false
+                  })
+                if (!extmark) return
+                const ref = store.extmarkToPart.get(extmark.id)
+                if (ref?.type === "pasted") {
+                  if (!expandPastedText(extmark.id)) return
+                } else if (ref?.type === "file") {
+                  if (!expandImageAttachment(extmark.id)) return
+                } else return
                 r.preventDefault()
                 r.stopPropagation()
               }}
