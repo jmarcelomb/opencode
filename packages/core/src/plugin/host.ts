@@ -546,6 +546,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
     },
     session: {
       hook: (name, callback, options) => hooks.register("session", name, callback, options),
+      list: (input) => sessions.listPage(input),
       create: (input) =>
         sessions.create({
           id: input?.id,
