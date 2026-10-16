@@ -1,9 +1,9 @@
 export * as Session from "./session.js"
 export * from "./session/schema.js"
 
-import { Effect, Layer, Schema, Context, Stream } from "effect"
+import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
 import { LLMClient } from "@opencode/ai"
-import { ListAnchor, ListCursor } from "@opencode/schema/session"
+import { ListAnchor, ListCursor, ListFilter } from "@opencode/schema/session"
 import { and, desc, eq } from "drizzle-orm"
 import { Project } from "./project.js"
 import { Model } from "@opencode/schema/model"
@@ -32,6 +32,7 @@ import {
   CompactionConflictError,
   ForkEmptyError,
   InboxConflictError,
+  InvalidListCursorError,
   MessageDecodeError,
   MessageNotFoundError,
   NotFoundError,
@@ -80,6 +81,10 @@ export { ListAnchor, ListCursor }
 export const ListInput = SessionStore.ListInput
 export type ListInput = SessionStore.ListInput
 
+/** A cursor carries the filters of the request that produced it, so filters passed with a cursor are ignored. */
+export type ListPageInput = ListFilter & { readonly limit?: number; readonly cursor?: ListCursor }
+const DefaultListPageLimit = 50
+
 type CreateBaseInput = {
   id?: SessionSchema.ID
   title?: string
@@ -103,6 +108,7 @@ export {
   BusyError,
   CompactionConflictError,
   InboxConflictError,
+  InvalidListCursorError,
   MessageDecodeError,
   MessageNotFoundError,
   NotFoundError,
@@ -119,6 +125,13 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<{
     readonly data: SessionSchema.Info[]
   }>
+  readonly listPage: (input?: ListPageInput) => Effect.Effect<
+    {
+      readonly data: SessionSchema.Info[]
+      readonly cursor: { readonly previous?: ListCursor; readonly next?: ListCursor }
+    },
+    InvalidListCursorError
+  >
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly fork: (
     input: ForkInput,
@@ -377,6 +390,32 @@ const layer = Layer.effect(
       }),
       list: Effect.fn("Session.list")(function* (input) {
         return { data: yield* store.list(input) }
+      }),
+      listPage: Effect.fn("Session.listPage")(function* (input = {}) {
+        const filter =
+          input.cursor === undefined
+            ? input
+            : yield* ListCursor.parse(input.cursor).pipe(Effect.mapError(() => new InvalidListCursorError()))
+        const data = yield* store.list({ ...filter, limit: input.limit ?? DefaultListPageLimit })
+        const first = data[0]
+        const last = data.at(-1)
+        return {
+          data,
+          cursor: {
+            previous: first
+              ? ListCursor.make({
+                  ...filter,
+                  anchor: { id: first.id, time: DateTime.toEpochMillis(first.time.updated), direction: "previous" },
+                })
+              : undefined,
+            next: last
+              ? ListCursor.make({
+                  ...filter,
+                  anchor: { id: last.id, time: DateTime.toEpochMillis(last.time.updated), direction: "next" },
+                })
+              : undefined,
+          },
+        }
       }),
       messages: Effect.fn("Session.messages")(function* (input) {
         yield* result.get(input.sessionID)
