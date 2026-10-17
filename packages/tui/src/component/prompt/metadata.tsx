@@ -9,6 +9,7 @@ export function PromptMetadataRow(props: {
   mode: "normal" | "shell"
   agent?: string
   auto: boolean
+  thinking: boolean
   model: string
   provider: string
   variant?: string
@@ -27,6 +28,7 @@ export function PromptMetadataRow(props: {
       terminalWidth: dimensions().width,
       agent: props.agent ?? "",
       auto: props.auto,
+      thinking: props.thinking,
       model: props.model,
       provider: props.provider,
       variant: props.variant,
@@ -86,6 +88,12 @@ export function PromptMetadataRow(props: {
             </Show>
           </box>
         </Show>
+        <Show when={props.mode === "normal" && layout().thinking}>
+          <>
+            <text fg={fade(theme.text.muted, props.modelAlpha)}>·</text>
+            <text fg={fade(theme.text.muted, props.modelAlpha)}>thinking</text>
+          </>
+        </Show>
       </Show>
     </box>
   )
@@ -98,6 +106,7 @@ function fade(color: RGBA, alpha: number) {
 type Layout = {
   agent?: string
   auto?: boolean
+  thinking?: boolean
   model: string
   provider?: string
   variant?: string
@@ -108,6 +117,7 @@ function promptMetadataLayout(input: {
   terminalWidth: number
   agent: string
   auto?: boolean
+  thinking?: boolean
   model: string
   provider: string
   variant?: string
@@ -115,6 +125,7 @@ function promptMetadataLayout(input: {
   const agent = input.terminalWidth < 44 ? undefined : input.agent
   const provider = input.terminalWidth < 44 ? "" : input.provider
   const candidates: Layout[] = [
+    { agent, auto: input.auto, thinking: input.thinking, model: input.model, provider, variant: input.variant },
     { agent, auto: input.auto, model: input.model, provider, variant: input.variant },
     { agent, model: input.model, provider, variant: input.variant },
     {
@@ -147,5 +158,6 @@ function text(input: Layout) {
     ...(input.model ? [...((input.agent || input.auto) ? ["·"] : []), input.model] : []),
     ...(input.provider ? [input.provider] : []),
     ...(input.variant ? ["·", input.variant] : []),
+    ...(input.thinking ? ["·", "thinking"] : []),
   ].join(" ")
 }

@@ -1915,6 +1915,7 @@ export function Prompt(props: PromptProps) {
                 mode={store.mode}
                 agent={agentLabel()}
                 auto={local.permission.mode === "autoaccept"}
+                thinking={config.session?.thinking === "show"}
                 model={promptDisplay().modelLabel}
                 provider={promptDisplay().providerLabel}
                 variant={promptDisplay().variant}
