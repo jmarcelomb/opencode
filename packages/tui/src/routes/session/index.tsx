@@ -1196,6 +1196,21 @@ export function Session(props: {
       },
     },
     {
+      title: local.permission.mode === "autoaccept" ? "Stop auto-accepting permissions" : "Auto-accept permissions",
+      id: "session.toggle.autoapprove",
+      group: "Session",
+      slash: { name: "yolo" },
+      run: () => {
+        local.permission.toggle()
+        toast.show({
+          message: local.permission.mode === "autoaccept" ? "Auto-accepting permissions" : "Stopped auto-accepting permissions",
+          variant: "info" as const,
+          duration: 3000,
+        })
+        dialog.clear()
+      },
+    },
+    {
       title: `Verbosity: ${Locale.titlecase(verbosity())}`,
       id: "session.verbosity.cycle",
       group: "Session",
