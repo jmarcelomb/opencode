@@ -112,7 +112,7 @@ export const Definitions = {
   "open.menu": keybind("ctrl+o", "Open recent sessions and projects"),
   "session.tab.next": keybind("ctrl+tab,alt+down", "Switch to next open session tab"),
   "session.tab.previous": keybind("ctrl+shift+tab,alt+up", "Switch to previous open session tab"),
-  "session.tab.history.back": keybind("none", "Go back in session tab history"),
+  "session.tab.history.back": keybind("<leader>o", "Go back in session tab history"),
   "session.tab.history.forward": keybind("ctrl+i", "Go forward in session tab history"),
   "session.tab.next_unread": keybind("alt+shift+down", "Switch to next unread session tab"),
   "session.tab.previous_unread": keybind("alt+shift+up", "Switch to previous unread session tab"),
