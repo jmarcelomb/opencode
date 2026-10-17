@@ -43,11 +43,16 @@ export function PromptMetadataRow(props: {
           {(agent) => <text fg={fade(props.highlight, props.agentAlpha)}>{agent()}</text>}
         </Show>
         <Show when={props.mode === "normal" && layout().auto}>
-          <text fg={fade(theme.text.muted, props.agentAlpha)}>auto</text>
+          <>
+            <Show when={layout().agent}>
+              <text fg={fade(theme.text.muted, props.agentAlpha)}>·</text>
+            </Show>
+            <text fg={fade(theme.text.muted, props.agentAlpha)}>yolo</text>
+          </>
         </Show>
         <Show when={props.mode === "normal" && layout().model}>
           <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-            <Show when={layout().agent}>
+            <Show when={layout().agent || (props.mode === "normal" && layout().auto)}>
               <text fg={fade(theme.text.muted, props.modelAlpha)}>·</text>
             </Show>
             <text
@@ -138,8 +143,8 @@ function promptMetadataLayout(input: {
 function text(input: Layout) {
   return [
     ...(input.agent ? [input.agent] : []),
-    ...(input.auto ? ["auto"] : []),
-    ...(input.model ? [...(input.agent ? ["·"] : []), input.model] : []),
+    ...(input.auto ? [...(input.agent ? ["·"] : []), "yolo"] : []),
+    ...(input.model ? [...((input.agent || input.auto) ? ["·"] : []), input.model] : []),
     ...(input.provider ? [input.provider] : []),
     ...(input.variant ? ["·", input.variant] : []),
   ].join(" ")
