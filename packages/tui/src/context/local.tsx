@@ -1,7 +1,7 @@
 import { createStore } from "solid-js/store"
 import { dedupeWith } from "effect/Array"
 import { createSimpleContext } from "./helper"
-import { batch, createMemo, onCleanup } from "solid-js"
+import { batch, createEffect, createMemo, onCleanup } from "solid-js"
 import { useEvent } from "./event"
 import path from "path"
 import { useTuiPaths } from "./runtime"
@@ -40,6 +40,31 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const event = useEvent()
     const permission = usePermission()
     const location = useLocation()
+
+    // App-level auto-approve: covers background tabs, not just the active route.
+    // Keyed by each pending session's root, so a yolo tab auto-approves its descendants.
+    // The per-route effect used to miss background tabs since only the active SessionFrame mounts.
+    // Closing a tab does not fire session.deleted, so a yolo session keeps auto-approving even
+    // with no tab open — intended, since a background yolo session would otherwise hang on a prompt.
+    // autoApproved only needs to live across the async reply window: once reply resolves it is
+    // cleared in .finally so the Set does not grow for the app's lifetime.
+    const autoApproved = new Set<string>()
+    createEffect(() => {
+      for (const sessionID of data.session.permission.sessions()) {
+        const root = data.session.root(sessionID)
+        if (permission.modeForRoot(root) !== "autoaccept") continue
+        for (const request of data.session.permission.list(sessionID) ?? []) {
+          if (autoApproved.has(request.id)) continue
+          autoApproved.add(request.id)
+          void data.session.permission
+            .reply({ sessionID: request.sessionID, decision: "once", requestID: request.id })
+            .catch((error) => {
+              toast.error(error)
+            })
+            .finally(() => autoApproved.delete(request.id))
+        }
+      }
+    })
 
     const models = () => data.location.model.list(location.ref)
     const providers = () => data.location.provider.list(location.ref)
