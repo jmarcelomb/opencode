@@ -44,6 +44,11 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
         const id = sessionID()
         return id ? (overrides[id] ?? initial) : initial
       },
+      // Query a session's mode by its ROOT id, not just the active route's.
+      // Overrides are keyed by root ids; passing a subagent id returns the default.
+      modeForRoot(sessionID: string): PermissionMode {
+        return overrides[sessionID] ?? initial
+      },
       setMode(next: PermissionMode) {
         const id = sessionID()
         if (!id) return
