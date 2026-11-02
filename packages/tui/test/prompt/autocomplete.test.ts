@@ -9,6 +9,8 @@ import {
   directoryAutocompleteResultValue,
   directoryAutocompleteSearch,
   directoryRecentValue,
+  isPathMentionQuery,
+  pathMentionAutocomplete,
   slashArgumentAutocomplete,
 } from "../../src/prompt/directory-completion"
 
@@ -214,5 +216,101 @@ describe("directoryRecentValue", () => {
 
   test("keeps paths outside home absolute", () => {
     expect(directoryRecentValue("/project/recent", "/home/user")).toBe("/project/recent")
+  })
+})
+
+describe("isPathMentionQuery", () => {
+  test("detects home and absolute path prefixes", () => {
+    expect(isPathMentionQuery("~")).toBe(true)
+    expect(isPathMentionQuery("~/")).toBe(true)
+    expect(isPathMentionQuery("~/Documents")).toBe(true)
+    expect(isPathMentionQuery("/")).toBe(true)
+    expect(isPathMentionQuery("/usr/local")).toBe(true)
+    expect(isPathMentionQuery("../")).toBe(true)
+    expect(isPathMentionQuery("../../foo")).toBe(true)
+    expect(isPathMentionQuery("..")).toBe(true)
+    expect(isPathMentionQuery("../..")).toBe(true)
+  })
+
+  test("rejects workspace-relative queries", () => {
+    expect(isPathMentionQuery("")).toBe(false)
+    expect(isPathMentionQuery("src")).toBe(false)
+    expect(isPathMentionQuery("packages/core")).toBe(false)
+    expect(isPathMentionQuery("foo.ts")).toBe(false)
+  })
+})
+
+describe("pathMentionAutocomplete", () => {
+  test("lists files and directories from home", async () => {
+    const location = { directory: "/project/current" }
+    const file = {
+      list: async () => ({
+        location: { directory: "/home/user" },
+        data: [
+          { path: "Documents/", type: "directory" },
+          { path: ".config/", type: "directory" },
+          { path: "notes.txt", type: "file" },
+        ],
+      }),
+    } as Parameters<typeof pathMentionAutocomplete>[0]
+    const result = await pathMentionAutocomplete(file, location, "~", "/home/user")
+    expect(result).toContainEqual({
+      value: "~",
+      absolute: "/home/user",
+      type: "directory",
+    })
+    expect(result).toContainEqual({
+      value: "~/Documents/",
+      absolute: path.resolve("/home/user/Documents"),
+      type: "directory",
+    })
+    expect(result).toContainEqual({
+      value: "~/notes.txt",
+      absolute: path.resolve("/home/user/notes.txt"),
+      type: "file",
+    })
+  })
+
+  test("filters by the last path component", async () => {
+    const location = { directory: "/project/current" }
+    const file = {
+      list: async () => ({
+        location: { directory: "/home/user" },
+        data: [
+          { path: "Documents/", type: "directory" },
+          { path: "Downloads/", type: "directory" },
+          { path: "projects/", type: "directory" },
+        ],
+      }),
+    } as Parameters<typeof pathMentionAutocomplete>[0]
+    const result = await pathMentionAutocomplete(file, location, "~/D", "/home/user")
+    expect(result.map((r) => r.value)).toEqual(["~/Documents/", "~/Downloads/"])
+  })
+
+  test("navigates into nested home directories", async () => {
+    const location = { directory: "/project/current" }
+    const file = {
+      list: async () => ({
+        location: { directory: "/home/user/Documents" },
+        data: [
+          { path: "work/", type: "directory" },
+          { path: "resume.pdf", type: "file" },
+        ],
+      }),
+    } as Parameters<typeof pathMentionAutocomplete>[0]
+    const result = await pathMentionAutocomplete(file, location, "~/Documents/", "/home/user")
+    expect(result.map((r) => r.value)).toEqual(["~/Documents/", "~/Documents/work/", "~/Documents/resume.pdf"])
+  })
+
+  test("lists from absolute paths", async () => {
+    const location = { directory: "/project/current" }
+    const file = {
+      list: async () => ({
+        location: { directory: "/usr/local" },
+        data: [{ path: "bin/", type: "directory" }, { path: "lib/", type: "directory" }],
+      }),
+    } as Parameters<typeof pathMentionAutocomplete>[0]
+    const result = await pathMentionAutocomplete(file, location, "/usr/local/", "/home/user")
+    expect(result.map((r) => r.value)).toEqual(["/usr/local/", "/usr/local/bin/", "/usr/local/lib/"])
   })
 })

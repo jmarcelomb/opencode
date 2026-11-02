@@ -26,6 +26,50 @@ export async function directoryAutocomplete(
   ]
 }
 
+export type PathMentionResult = {
+  value: string
+  absolute: string
+  type: "file" | "directory"
+}
+
+export async function pathMentionAutocomplete(
+  file: Pick<OpenCodeClient["file"], "list">,
+  location: { directory: string },
+  query: string,
+  home: string,
+): Promise<PathMentionResult[]> {
+  const search = directoryAutocompleteSearch(query, location.directory, home)
+  const result = await file.list({ location, path: search.directory })
+  const exact = directoryAutocompleteExactValue(query, search)
+  return [
+    ...(exact ? [{ value: exact, absolute: search.directory, type: "directory" as const }] : []),
+    ...result.data
+      .map((item) => ({
+        absolute: path.resolve(result.location.directory, item.path),
+        type: item.type,
+      }))
+      .filter((entry) => directoryAutocompleteMatches(path.basename(entry.absolute), search.query))
+      .map((entry) => ({
+        value: directoryAutocompleteResultValue(
+          path.basename(entry.absolute) + (entry.type === "directory" ? "/" : ""),
+          search,
+        ),
+        absolute: entry.absolute,
+        type: entry.type,
+      })),
+  ]
+}
+
+export function isPathMentionQuery(query: string): boolean {
+  if (!query) return false
+  if (query === "~" || query.startsWith("~/")) return true
+  if (query.startsWith("/")) return true
+  // ../ or .. patterns that navigate above the workspace
+  if (/^(?:\.\.\/)+/.test(query)) return true
+  if (/^(?:\.\.\/)*\.\.$/.test(query)) return true
+  return false
+}
+
 export function slashArgumentAutocomplete(
   beforeCursor: string,
   widthMethod: WidthMethod,

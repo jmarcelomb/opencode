@@ -26,6 +26,7 @@ import { createTuiClipboard, type OwnedClipboardService } from "../clipboard"
 import type { ClipboardService } from "../context/clipboard"
 import fuzzysort from "fuzzysort"
 import path from "path"
+import os from "node:os"
 import { pathToFileURL } from "node:url"
 import {
   For,
@@ -495,7 +496,10 @@ export function createPromptState(input: PromptInput): PromptState {
       const next = parseFileLineRange(value)
       const list = await input.findFiles(next.base)
       return list.map((item): Auto => {
-        const url = pathToFileURL(path.resolve(input.directory(), item))
+        const resolved = item.startsWith("~/")
+          ? path.join(os.homedir(), item.slice(2))
+          : path.resolve(input.directory(), item)
+        const url = pathToFileURL(resolved)
         let filename = item
         if (next.lineRange && !item.endsWith("/")) {
           filename = `${item}#${next.lineRange.startLine}${next.lineRange.endLine ? `-${next.lineRange.endLine}` : ""}`
