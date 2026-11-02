@@ -22,6 +22,7 @@ import {
   resolveSessionInfo,
 } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
+import { isPathMentionQuery, pathMentionAutocomplete } from "../prompt/directory-completion"
 import { cycleVariant, formatModelLabel, resolveVariant } from "./variant.shared"
 import { verbosityPreset } from "./verbosity"
 import type {
@@ -230,15 +231,26 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
   const shell = await (deps.createRuntimeLifecycle ?? createRuntimeLifecycle)({
     host: input.host,
     getDirectory: () => state.location.directory,
-    findFiles: (query) =>
-      state.sdk.file
+    findFiles: (query) => {
+      if (isPathMentionQuery(query)) {
+        return pathMentionAutocomplete(
+          state.sdk.file,
+          { directory: state.location.directory },
+          query,
+          input.host.paths.home,
+        )
+          .then((entries) => entries.map((entry) => entry.value))
+          .catch(() => [])
+      }
+      return state.sdk.file
         .find({
           query,
           type: "file",
           location: { directory: state.location.directory },
         })
         .then((result) => result.data.map((file) => file.path))
-        .catch(() => []),
+        .catch(() => [])
+    },
     agents: [],
     references: [],
     sessionID: state.sessionID,
