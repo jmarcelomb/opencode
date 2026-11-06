@@ -84,6 +84,7 @@ import { McpResourceTools } from "../tool/plugin/mcp-resource.js"
 import { OpenCodeTools } from "../tool/plugin/opencode.js"
 import { QuestionTool } from "../tool/plugin/question.js"
 import { ReadToolFileSystem } from "../tool/read-filesystem.js"
+import { A2aTools } from "../tool/plugin/a2a.js"
 import { ReadTool } from "../tool/plugin/read.js"
 import { ArtifactTools } from "../tool/plugin/artifact.js"
 import { ScheduleTools } from "../tool/plugin/schedule.js"
@@ -272,6 +273,7 @@ const pre = [
   ReadTool.Plugin,
   ArtifactTools.Plugin,
   ScheduleTools.Plugin,
+  A2aTools.Plugin,
   ShellTool.Plugin,
   SkillTool.Plugin,
   SubagentTool.Plugin,

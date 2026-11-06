@@ -271,6 +271,11 @@ import type {
   ExperimentalArtifactsViewOutput,
   ExperimentalJobListInput,
   ExperimentalJobListOutput,
+  ExperimentalA2aCardOutput,
+  ExperimentalA2aRpcInput,
+  ExperimentalA2aRpcOutput,
+  ExperimentalA2aSessionsInput,
+  ExperimentalA2aSessionsOutput,
   ShellListInput,
   ShellListOutput,
   ShellCreateInput,
@@ -1697,6 +1702,43 @@ export function make(options: ClientOptions) {
               },
               successStatus: 200,
               declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+      },
+      a2a: {
+        card: (requestOptions?: RequestOptions) =>
+          request<ExperimentalA2aCardOutput>(
+            {
+              method: "GET",
+              path: `/.well-known/agent-card.json`,
+              successStatus: 200,
+              declaredStatuses: [400, 401, 403],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        rpc: (input: ExperimentalA2aRpcInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalA2aRpcOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/a2a`,
+              body: input["payload"],
+              successStatus: 200,
+              declaredStatuses: [400, 401, 403, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        sessions: (input?: ExperimentalA2aSessionsInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: ExperimentalA2aSessionsOutput }>(
+            {
+              method: "GET",
+              path: `/api/experimental/a2a/sessions`,
+              query: { directory: input?.["directory"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 403],
               empty: false,
             },
             requestOptions,
