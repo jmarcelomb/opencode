@@ -104,12 +104,18 @@ export const A2aDbLayer = Layer.sync(
       sqlite.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('a2a_context') WHERE name = 'last_used_at'").get() as { n: number }
     ).n > 0
     if (!hasLastUsedAt) sqlite.exec("ALTER TABLE a2a_context ADD COLUMN last_used_at INTEGER NOT NULL DEFAULT 0")
+    // peer_url records which A2A peer endpoint a thread belongs to, learned from
+    // outbound a2a_call replies (the a2a tool writes it directly). Nullable:
+    // inbound-only threads have no known reply URL.
+    const hasPeerUrl = (
+      sqlite.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('a2a_context') WHERE name = 'peer_url'").get() as { n: number }
+    ).n > 0
+    if (!hasPeerUrl) sqlite.exec("ALTER TABLE a2a_context ADD COLUMN peer_url TEXT")
     sqlite.exec(`CREATE INDEX IF NOT EXISTS a2a_task_context_idx ON a2a_task(context_id)`)
     sqlite.exec(`CREATE INDEX IF NOT EXISTS a2a_context_last_used_idx ON a2a_context(last_used_at)`)
     sqlite.exec(`CREATE INDEX IF NOT EXISTS a2a_task_created_idx ON a2a_task(created_at)`)
 
     const contextQuery = sqlite.prepare("SELECT context_id, session_id, directory, created_at, last_used_at FROM a2a_context WHERE context_id = ?")
-    const contextInsert = sqlite.prepare("INSERT OR REPLACE INTO a2a_context (context_id, session_id, directory, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)")
     const contextTouch = sqlite.prepare("UPDATE a2a_context SET last_used_at = ? WHERE context_id = ?")
     const taskQuery = sqlite.prepare("SELECT task_id, context_id, session_id, created_at FROM a2a_task WHERE task_id = ?")
     const taskInsert = sqlite.prepare("INSERT OR REPLACE INTO a2a_task (task_id, context_id, session_id, created_at) VALUES (?, ?, ?, ?)")
@@ -141,7 +147,17 @@ export const A2aDbLayer = Layer.sync(
         return Promise.resolve({ contextId: row.context_id, sessionID: row.session_id, directory: row.directory, createdAt: row.created_at })
       },
       saveContext: (row: A2aContextRow) => {
-        contextInsert.run(row.contextId, row.sessionID, row.directory, row.createdAt, row.createdAt)
+        // Upsert (not INSERT OR REPLACE) so a re-save of an existing context
+        // preserves created_at and the tool-written peer_url.
+        sqlite
+          .prepare(
+            `INSERT INTO a2a_context (context_id, session_id, directory, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(context_id) DO UPDATE SET
+               session_id = excluded.session_id,
+               directory = excluded.directory,
+               last_used_at = excluded.last_used_at`,
+          )
+          .run(row.contextId, row.sessionID, row.directory, row.createdAt, row.createdAt)
         return Promise.resolve()
       },
       resolveTask: (taskId: string) => {

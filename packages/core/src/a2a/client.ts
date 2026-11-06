@@ -137,36 +137,53 @@ export const sendMessageAsync = Effect.fn("A2aClient.sendMessageAsync")(function
       }, requestOptions(input.auth))
 
       try {
+        // Track IDs across events: the peer may split them over several
+        // updates (e.g. a working update, then a terminal one), and any
+        // single event can omit one.
+        let taskId = ""
+        let contextId = ""
         for await (const event of stream) {
-          const payload = (event as { payload?: { $case: string; value: { id?: string; status?: { state?: number; message?: { parts?: { content?: { $case?: string; value?: string } }[] } } } } }).payload
+          const payload = (event as { payload?: { $case: string; value: { id?: string; contextId?: string; status?: { state?: number; message?: { parts?: { content?: { $case?: string; value?: string } }[] } } } } }).payload
           if (!payload) continue
 
           if (payload.$case === "task") {
             const task = payload.value
+            taskId = task.id || taskId
+            contextId = task.contextId || contextId
             const rawState = taskStateToJSON(task.status?.state ?? 0)
             const state = rawState.replace("TASK_STATE_", "").toLowerCase()
-            const taskId = task.id ?? ""
             const text = task.status?.message?.parts?.map((p) => (p.content?.$case === "text" ? p.content.value : "")).join("\n") ?? ""
 
             // Return as soon as we see working state — the task is running.
             if (state === "working") {
-              return { state, text: "", taskId, isTask: true }
+              return { state, text: "", taskId, contextId, isTask: true }
             }
             // Terminal state arrived before working — return the result.
-            return { state, text, taskId, isTask: true }
+            return { state, text, taskId, contextId, isTask: true }
           }
 
           if (payload.$case === "statusUpdate") {
-            const update = payload.value as { status?: { state?: number }; taskId?: string }
+            const update = payload.value as { status?: { state?: number; message?: { parts?: { content?: { $case?: string; value?: string } }[] } }; taskId?: string; contextId?: string }
+            taskId = update.taskId || taskId
+            contextId = update.contextId || contextId
             const rawState = taskStateToJSON(update.status?.state ?? 0)
             const state = rawState.replace("TASK_STATE_", "").toLowerCase()
             if (state === "working") {
-              return { state, text: "", taskId: update.taskId ?? "", isTask: true }
+              // Return early only once we can name the task; otherwise keep
+              // streaming and let a later event carry the IDs.
+              if (taskId) return { state, text: "", taskId, contextId, isTask: true }
+              continue
             }
+            // submitted or terminal update: peers end the stream after it,
+            // and dropping it would lose the IDs (observed with rejected
+            // replies). Return it as the result.
+            const text = update.status?.message?.parts?.map((p) => (p.content?.$case === "text" ? p.content.value : "")).join("\n") ?? ""
+            return { state, text, taskId, contextId, isTask: true }
           }
         }
-        // Stream ended without a terminal state — return working with empty taskId.
-        return { state: "working", text: "", taskId: "", isTask: true }
+        // Stream ended without a terminal state — return working with whatever
+        // IDs the updates carried.
+        return { state: "working", text: "", taskId, contextId, isTask: true }
       } finally {
         // Cancel the stream generator so the HTTP connection is released.
         await stream.return(undefined as unknown as undefined)
@@ -178,7 +195,7 @@ export const sendMessageAsync = Effect.fn("A2aClient.sendMessageAsync")(function
       }),
   })
 
-  return result as { state: string; text: string; taskId: string; isTask: boolean }
+  return result as { state: string; text: string; taskId: string; contextId: string; isTask: boolean }
 })
 
 /** Poll a peer for the current state of a task (GetTask). */
@@ -195,7 +212,7 @@ export function getTask(input: {
     })
 
     const task = yield* Effect.tryPromise({
-      try: () => withRetry(() => client.getTask({ id: input.taskId, tenant: "", historyLength: input.historyLength ?? 0 })),
+      try: () => withRetry(() => client.getTask({ id: input.taskId, tenant: "", historyLength: input.historyLength ?? 0 }, requestOptions(input.auth))),
       catch: (cause) =>
         new A2aClientError({
           message: `A2A peer at ${input.url} getTask failed: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -219,7 +236,7 @@ export function cancelTask(input: {
     })
 
     const task = yield* Effect.tryPromise({
-      try: () => withRetry(() => client.cancelTask({ id: input.taskId, tenant: "", metadata: undefined })),
+      try: () => withRetry(() => client.cancelTask({ id: input.taskId, tenant: "", metadata: undefined }, requestOptions(input.auth))),
       catch: (cause) =>
         new A2aClientError({
           message: `A2A peer at ${input.url} cancelTask failed: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -231,15 +248,15 @@ export function cancelTask(input: {
 }
 
 /** Extract text and state from a typed SendMessage result (Task | Message). */
-export function extractResult(result: Task | Message): { state: string; text: string; taskId?: string } {
+export function extractResult(result: Task | Message): { state: string; text: string; taskId?: string; contextId?: string } {
   if ("status" in result) {
     const rawState = taskStateToJSON(result.status?.state ?? 0)
     const state = rawState.replace("TASK_STATE_", "").toLowerCase()
     const text = result.status?.message?.parts?.map((p) => (p.content?.$case === "text" ? p.content.value : "")).join("\n") ?? ""
-    return { state, text, taskId: result.id || undefined }
+    return { state, text, taskId: result.id || undefined, contextId: result.contextId || undefined }
   }
   const text = result.parts?.map((p) => (p.content?.$case === "text" ? p.content.value : "")).join("\n") ?? ""
-  return { state: "completed", text }
+  return { state: "completed", text, contextId: result.contextId || undefined }
 }
 
 /** Extract text and state from a Task (internal helper). */

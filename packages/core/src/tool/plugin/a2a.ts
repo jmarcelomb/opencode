@@ -12,6 +12,7 @@ import PROMPT_A2A from "../../plugin/command/a2a.txt"
 import { Permission } from "../../permission.js"
 import { Session as SessionService } from "../../session.js"
 import { A2aClient } from "../../a2a/client.js"
+import * as A2aThreads from "../../a2a/threads.js"
 
 /** Validate that a URL is http(s) and has no embedded credentials.
  *  SSRF defense: reject non-http(s) protocols and URL-embedded credentials. */
@@ -35,21 +36,24 @@ const PeersOutput = Schema.Struct({
 })
 
 const CallOutput = Schema.Struct({
-  state: Schema.Literals(["completed", "failed", "canceled", "input-required", "working"]),
+  state: Schema.Literals(["submitted", "working", "input-required", "completed", "canceled", "failed", "rejected", "auth-required"]),
   text: Schema.String,
   taskId: Schema.String.pipe(optional).annotate({
     description: "The A2A task ID. Present when the task is still working (async mode) for later polling with a2a_get_task.",
   }),
+  contextId: Schema.String.pipe(optional).annotate({
+    description: "The A2A context (thread) ID assigned by the peer. Pass it as contextId on subsequent a2a_call messages to continue the same conversation.",
+  }),
 })
 
 const GetTaskOutput = Schema.Struct({
-  state: Schema.Literals(["completed", "failed", "canceled", "input-required", "working"]),
+  state: Schema.Literals(["submitted", "working", "input-required", "completed", "canceled", "failed", "rejected", "auth-required"]),
   text: Schema.String,
   taskId: Schema.String,
 })
 
 const CancelTaskOutput = Schema.Struct({
-  state: Schema.Literals(["completed", "failed", "canceled", "input-required", "working"]),
+  state: Schema.Literals(["submitted", "working", "input-required", "completed", "canceled", "failed", "rejected", "auth-required"]),
   text: Schema.String,
   taskId: Schema.String,
 })
@@ -106,7 +110,7 @@ export const Plugin = {
         editor.add({
           name: "a2a_call",
           description:
-            "Send a message to another A2A agent. For a local opencode session, pass its session ID from a2a_peers. For any remote A2A-compatible agent (Hermes, Google ADK, etc.), pass its URL. The peer processes the message and returns its reply. Set async:true to return immediately with a task ID when the peer is still working — poll later with a2a_get_task. The A2A_HERMES_TOKEN env var is used automatically when no auth is passed.",
+            "Send a message to another A2A agent. For a local opencode session, pass its session ID from a2a_peers. For any remote A2A-compatible agent (Hermes, Google ADK, etc.), pass its URL. The peer processes the message and returns its reply. Set async:true to return immediately with a task ID when the peer is still working — poll later with a2a_get_task. The A2A_HERMES_TOKEN env var is used automatically when no auth is passed. Replies stay in the peer's conversation thread: the contextId is returned in the output and, when the session has exactly one A2A thread, reused automatically on the next call without an explicit contextId.",
           input: Schema.Struct({
             sessionID: Session.ID.pipe(optional).annotate({
               description: "A local opencode session ID to message (from a2a_peers).",
@@ -161,21 +165,86 @@ export const Plugin = {
                   ...Permission.invocation(context),
                 })
 
+                // Thread continuity: when the caller doesn't pin a contextId,
+                // reuse the session's A2A thread if there is exactly one, so
+                // feedback lands in the conversation the peer started. With
+                // several threads the choice is ambiguous — list them instead
+                // of guessing.
+                let contextId = input.contextId
+                if (!contextId) {
+                  const threads = A2aThreads.listSessionThreads(context.sessionID)
+                  if (threads.length === 1) contextId = threads[0].contextId
+                  if (threads.length > 1) {
+                    const list = threads
+                      .map(
+                        (t) =>
+                          `- ${t.contextId} (peer: ${t.peerUrl ?? "unknown"}, dir: ${t.directory}, last used: ${new Date(t.lastUsedAt).toISOString()})`,
+                      )
+                      .join("\n")
+                    const msg = `Multiple A2A threads exist for this session; pass the contextId of the thread you want to reply to:\n${list}`
+                    return { output: { state: "failed" as const, text: msg }, content: msg }
+                  }
+                }
+
                 // Async mode: use streaming to return early with a task ID.
                 if (input.async) {
-                  const asyncResult = yield* A2aClient.sendMessageAsync({ url, message: input.message, auth: input.auth, contextId: input.contextId, metadata: a2aMetadata })
+                  const asyncResult = yield* A2aClient.sendMessageAsync({
+                    url,
+                    message: input.message,
+                    auth: input.auth,
+                    contextId,
+                    metadata: undefined,
+                  })
+                  if (asyncResult.contextId) {
+                    A2aThreads.rememberThread({
+                      contextId: asyncResult.contextId,
+                      sessionID: context.sessionID,
+                      directory: callerInfo.directory ?? process.cwd(),
+                      peerUrl: url,
+                    })
+                  }
                   if (asyncResult.state === "working" && asyncResult.taskId) {
                     return {
-                      output: { state: "working" as const, text: "", taskId: asyncResult.taskId },
+                      output: { state: "working" as const, text: "", taskId: asyncResult.taskId, contextId: asyncResult.contextId || undefined },
                       content: `Task ${asyncResult.taskId} is still working. Poll with a2a_get_task to get the result.`,
                     }
                   }
-                  return { output: { state: asyncResult.state as "completed" | "failed" | "canceled" | "input-required" | "working", text: asyncResult.text, taskId: asyncResult.taskId || undefined }, content: asyncResult.text || `Task ${asyncResult.state}` }
+                  return {
+                    output: {
+                      state: asyncResult.state as "completed" | "failed" | "canceled" | "input-required" | "working",
+                      text: asyncResult.text,
+                      taskId: asyncResult.taskId || undefined,
+                      contextId: asyncResult.contextId || undefined,
+                    },
+                    content: asyncResult.text || `Task ${asyncResult.state}`,
+                  }
                 }
 
-                const result = yield* A2aClient.sendMessage({ url, message: input.message, auth: input.auth, contextId: input.contextId, metadata: a2aMetadata })
-                const { state, text, taskId } = A2aClient.extractResult(result)
-                return { output: { state: state as "completed" | "failed" | "canceled" | "input-required" | "working", text, taskId }, content: text || `Task ${state}` }
+                // No metadata on remote calls: peers reject unknown metadata
+                // payloads (the Hermes gateway refuses messages carrying it).
+                const result = yield* A2aClient.sendMessage({ url, message: input.message, auth: input.auth, contextId, metadata: undefined })
+                const { state, text, taskId, contextId: resultContextId } = A2aClient.extractResult(result)
+                if (resultContextId) {
+                  A2aThreads.rememberThread({
+                    contextId: resultContextId,
+                    sessionID: context.sessionID,
+                    directory: callerInfo.directory ?? process.cwd(),
+                    peerUrl: url,
+                  })
+                }
+                const footer =
+                  resultContextId && !input.contextId
+                    ? `\n\n[a2a thread: ${resultContextId} — pass as contextId on a2a_call to continue this conversation]`
+                    : ""
+                return {
+                  output: {
+                    state: state as "completed" | "failed" | "canceled" | "input-required" | "working",
+                    text,
+                    taskId,
+                    contextId: resultContextId,
+                  },
+                  content: (text || `Task ${state}`) + footer,
+                }
               }
 
               // Local peer: use Session.prompt directly (no HTTP round-trip)
