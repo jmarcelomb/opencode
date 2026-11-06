@@ -59,8 +59,11 @@ const OUTPUT_TOKEN_MAX = 256_000
 const ESTIMATE_ERROR = 0.15
 // Share of the window a turn leaves unused when its output limit is fitted to the room left. Providers count a few
 // tokens more than we do (chat template, tool schemas), and strict ones reject input plus output past the window.
-// Compaction sizes its summary against its own reserve instead.
 const WINDOW_HEADROOM = 0.01
+// Compaction wants near-full window room for its summary, so it keeps a smaller reserve than a primary turn.
+// Even a 1-token drift between our measured count and the provider's fresh recount overflows a strict window when
+// the summary is sized to exactly context minus input, so this small buffer absorbs that drift at the edge.
+const COMPACTION_HEADROOM = 0.005
 // Never ask for less; only reachable with automatic compaction off, since it keeps the window from filling this far.
 const OUTPUT_TOKEN_MIN = 1_024
 
@@ -301,7 +304,7 @@ export const layer = Layer.effect(
             kind === "primary"
               ? { maxTokens: outputLimit(model.limit, input.inputTokens, WINDOW_HEADROOM) }
               : kind === "compaction"
-                ? { maxTokens: outputLimit(model.limit, input.inputTokens) }
+                ? { maxTokens: outputLimit(model.limit, input.inputTokens, COMPACTION_HEADROOM) }
                 : {},
         },
         Object.fromEntries(Array.from(given, ([d, t]) => [t.name, d])),

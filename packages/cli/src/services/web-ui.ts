@@ -21,6 +21,7 @@ export const handler = Effect.fn("cli.web-ui.handler")(function* (options?: {
         url.pathname === "/api" ||
         url.pathname.startsWith("/api/") ||
         url.pathname.startsWith("/auth/") ||
+        url.pathname.startsWith("/.well-known/") ||
         url.pathname === "/openapi.json"
       )
         return yield* api.pipe(

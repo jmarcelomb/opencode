@@ -2526,6 +2526,26 @@ export type ExperimentalJobListOperation<E = never> = (
   input?: ExperimentalJobListInput,
 ) => Effect.Effect<ExperimentalJobListOutput, E>
 
+export type ExperimentalA2aCardOutput = unknown
+export type ExperimentalA2aCardOperation<E = never> = () => Effect.Effect<ExperimentalA2aCardOutput, E>
+
+export type ExperimentalA2aRpcInput = { readonly payload: unknown }
+export type ExperimentalA2aRpcOutput = unknown
+export type ExperimentalA2aRpcOperation<E = never> = (
+  input: ExperimentalA2aRpcInput,
+) => Effect.Effect<ExperimentalA2aRpcOutput, E>
+
+export type ExperimentalA2aSessionsInput = { readonly directory?: string | undefined }
+export type ExperimentalA2aSessionsOutput = ReadonlyArray<{
+  readonly sessionID: Session.ID
+  readonly title?: string | undefined
+  readonly a2aUrl: string
+  readonly state: "idle" | "working" | "archived"
+}>
+export type ExperimentalA2aSessionsOperation<E = never> = (
+  input?: ExperimentalA2aSessionsInput,
+) => Effect.Effect<ExperimentalA2aSessionsOutput, E>
+
 export interface ExperimentalApi<E = never> {
   readonly persistentPty: {
     readonly read: ExperimentalPersistentPtyReadOperation<E>
@@ -2556,6 +2576,11 @@ export interface ExperimentalApi<E = never> {
     readonly delete: ExperimentalArtifactsDeleteOperation<E>
   }
   readonly job: { readonly list: ExperimentalJobListOperation<E> }
+  readonly a2a: {
+    readonly card: ExperimentalA2aCardOperation<E>
+    readonly rpc: ExperimentalA2aRpcOperation<E>
+    readonly sessions: ExperimentalA2aSessionsOperation<E>
+  }
 }
 
 export type ShellListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }

@@ -18,6 +18,7 @@ import { ServerHandler } from "./handlers/server"
 import { DebugHandler } from "./handlers/debug"
 import { PtyHandler } from "./handlers/pty"
 import { PersistentPtyHandler } from "./handlers/persistent-pty"
+import { A2aDbLayer } from "./handlers/a2a-db"
 import { ShellHandler } from "./handlers/shell"
 import { ReferenceHandler } from "./handlers/reference"
 import { LocationHandler } from "./handlers/location"
@@ -60,7 +61,7 @@ export const handlers = Layer.mergeAll(
   RpcHandler,
   EventHandler.pipe(Layer.provide(EventFeed.layer)),
   PtyHandler,
-  PersistentPtyHandler,
+  PersistentPtyHandler.pipe(Layer.provide(A2aDbLayer)),
   ShellHandler,
   ReferenceHandler,
   WorktreeHandler,

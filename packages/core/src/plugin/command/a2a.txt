@@ -1,0 +1,23 @@
+Communicate with another agent using the A2A (Agent2Agent) protocol.
+
+Request: $ARGUMENTS
+
+Use the A2A tools in the `opencode` namespace:
+
+- `a2a_peers` — list other opencode sessions in your working directory that can receive messages. Call this first to discover local peers.
+- `a2a_call` — send a message to another agent. For a local opencode session, pass `sessionID` from `a2a_peers`. For a remote A2A-compatible agent (Hermes, Google ADK, another opencode server, etc.), pass its `url`. Pass `auth` if the remote peer requires a bearer token (defaults to A2A_HERMES_TOKEN from the environment). Pass `contextId` for multi-turn conversations. Set `async: true` to return immediately with a task ID when the peer is still working — poll later with `a2a_get_task`.
+- `a2a_get_task` — poll a remote A2A peer for the status of a task started by `a2a_call` with `async: true`. Returns the task state and any reply text available so far.
+- `a2a_cancel_task` — cancel a task on a remote A2A peer that was started by `a2a_call`.
+- `a2a_discover` — fetch a remote agent's Agent Card to learn its name, capabilities, and endpoint URL before calling `a2a_call`.
+
+When to use A2A:
+- Ask a peer a specific question when it has context you don't (another session working on a related part of the codebase).
+- Delegate to a specialist agent on another machine or framework (e.g., a Hermes instance with different tools or memory).
+- Coordinate work across multiple sessions in the same project.
+
+When NOT to use A2A:
+- Prefer subagents for tasks that need to run in the same process with direct filesystem access.
+- Prefer `webfetch` for reading URLs that are not A2A agents.
+- Do not use A2A for simple file or code questions you can answer yourself.
+
+Reply with the peer's response or a summary of what happened.

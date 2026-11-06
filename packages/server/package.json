@@ -27,6 +27,7 @@
     "probe:workerd": "bun run script/workerd-probe.ts"
   },
   "dependencies": {
+    "@a2a-js/sdk": "1.3.0",
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",
     "@opencode/core": "workspace:*",

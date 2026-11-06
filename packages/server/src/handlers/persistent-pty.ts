@@ -11,12 +11,13 @@ import {
   PTY_CONNECT_TOKEN_HEADER,
   PTY_CONNECT_TOKEN_HEADER_VALUE,
 } from "@opencode/protocol/groups/persistent-pty"
-import { Effect, Queue } from "effect"
+import { Effect, Queue, Stream } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder, HttpApiSchema } from "effect/http-api"
 import { Socket } from "effect/socket"
 import { Api } from "../api"
 import { CorsConfig, isAllowedRequestOrigin } from "../cors"
+import { makeA2a } from "./a2a"
 import { makeArtifact } from "./artifact"
 import { makeJob } from "./job"
 import { makeMediaGet } from "./media"
@@ -32,6 +33,7 @@ export const PersistentPtyHandler = HttpApiBuilder.group(Api, "server.experiment
     const job = yield* makeJob
     const mediaGet = yield* makeMediaGet
     const schedule = yield* makeSchedule
+    const a2a = yield* makeA2a
 
     return handlers
       .handleRaw("media.get", (ctx) => mediaGet(ctx.params.hash, ctx.request))
@@ -49,6 +51,60 @@ export const PersistentPtyHandler = HttpApiBuilder.group(Api, "server.experiment
       .handle("schedule.pause", (ctx) => schedule.pause(ctx.params.scheduleID))
       .handle("schedule.resume", (ctx) => schedule.resume(ctx.params.scheduleID))
       .handle("schedule.delete", (ctx) => schedule.remove(ctx.params.scheduleID))
+      .handle("a2a.card", () =>
+        a2a
+          .card()
+          .pipe(Effect.catchTag("A2A.DisabledError", () => Effect.fail(new ForbiddenError({ message: "A2A is not enabled" })))),
+      )
+      .handle("a2a.sessions", (ctx) =>
+        a2a
+          .sessions(ctx.query.directory)
+          .pipe(
+            Effect.map((data) => ({ data })),
+            Effect.catchTag("A2A.DisabledError", () => Effect.fail(new ForbiddenError({ message: "A2A is not enabled" }))),
+            Effect.catchTag("A2A.UnauthorizedError", (error) => Effect.fail(new ForbiddenError({ message: error.message }))),
+            Effect.catchTag("Session.InvalidListCursorError", () => Effect.fail(new InvalidRequestError({ message: "Invalid list cursor" }))),
+          ),
+      )
+      .handleRaw("a2a.rpc", (ctx) =>
+        Effect.gen(function* () {
+          const body = yield* ctx.request.json.pipe(
+            Effect.mapError(() => new InvalidRequestError({ message: "Invalid JSON body" })),
+          )
+
+          // Streaming requests get an SSE response
+          if (typeof body === "object" && body !== null && (body as { method?: string }).method === "SendStreamingMessage") {
+            const frames = yield* a2a.streamMessage(body, ctx.request).pipe(
+              Effect.mapError(() => new InvalidRequestError({ message: "A2A streaming failed" })),
+            )
+            const heartbeat = Stream.tick("15 seconds").pipe(Stream.map(() => ": heartbeat\n\n"))
+            const output = frames.pipe(
+              Stream.filter((frame: string) => frame !== ""),
+              Stream.merge(heartbeat, { haltStrategy: "left" }),
+              Stream.encodeText,
+            )
+            return HttpServerResponse.stream(output, {
+              contentType: "text/event-stream",
+              headers: {
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "X-Content-Type-Options": "nosniff",
+              },
+            })
+          }
+
+          const response = yield* a2a.rpc(body, ctx.request).pipe(
+            Effect.mapError(() => new InvalidRequestError({ message: "A2A request failed" })),
+          )
+          // The response may contain branded types or undefined values that the framework's
+          // JSON encoder rejects. Round-trip through JSON to produce plain JSON.
+          const jsonText = JSON.stringify(response)
+          return HttpServerResponse.text(jsonText, {
+            contentType: "application/json",
+            headers: { "Cache-Control": "no-cache" },
+          })
+        }),
+      )
       .handle(
         "persistentPty.read",
         Effect.fn(function* (ctx) {

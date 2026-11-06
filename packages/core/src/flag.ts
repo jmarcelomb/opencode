@@ -62,11 +62,14 @@ export function resolve(input: {
   return Record.map(ConfigFlag.registry, (_, key): State => {
     const override = env.get(key) ?? (all ? true : undefined)
     const configured = experimental?.[key] ?? (allFlags ? true : undefined)
+    // A flag value may be a boolean or a struct (e.g., experimental.a2a can be `{ tokens, peers }`).
+    // The flag is on when the value is truthy, regardless of shape.
+    const configuredBool = configured === true || (typeof configured === "object" && configured !== null)
     const [enabled, source]: [boolean, State["source"]] =
       override !== undefined
         ? [override, "env"]
         : configured !== undefined
-          ? [configured, "config"]
+          ? [configuredBool, "config"]
           : [onByDefault(input.channel), "default"]
     return { enabled, source }
   })

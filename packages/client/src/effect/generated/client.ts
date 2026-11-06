@@ -269,6 +269,11 @@ import type {
   ExperimentalArtifactsDeleteOutput,
   ExperimentalJobListInput,
   ExperimentalJobListOutput,
+  ExperimentalA2aCardOutput,
+  ExperimentalA2aRpcInput,
+  ExperimentalA2aRpcOutput,
+  ExperimentalA2aSessionsInput,
+  ExperimentalA2aSessionsOutput,
   ShellListInput,
   ShellListOutput,
   ShellCreateInput,
@@ -1715,6 +1720,24 @@ const EndpointExperimentalJobList = (raw: RawClient["server.experimental"]) => (
     ),
   )
 
+const EndpointExperimentalA2aCard = (raw: RawClient["server.experimental"]) => () =>
+  preserveEffect<ExperimentalA2aCardOutput>()(raw["a2a.card"]({}).pipe(Effect.mapError(mapClientError)))
+
+type ExperimentalA2aRpcRequest = Parameters<RawClient["server.experimental"]["a2a.rpc"]>[0]
+const EndpointExperimentalA2aRpc = (raw: RawClient["server.experimental"]) => (input: ExperimentalA2aRpcInput) =>
+  preserveEffect<ExperimentalA2aRpcOutput>()(
+    raw["a2a.rpc"]({ payload: input["payload"] } as ExperimentalA2aRpcRequest).pipe(Effect.mapError(mapClientError)),
+  )
+
+const EndpointExperimentalA2aSessions =
+  (raw: RawClient["server.experimental"]) => (input?: ExperimentalA2aSessionsInput) =>
+    preserveEffect<ExperimentalA2aSessionsOutput>()(
+      raw["a2a.sessions"]({ query: { directory: input?.["directory"] } }).pipe(
+        Effect.mapError(mapClientError),
+        Effect.map((value) => value.data),
+      ),
+    )
+
 const adaptGroupExperimental = (raw: RawClient["server.experimental"]) => ({
   persistentPty: {
     read: EndpointExperimentalPersistentPtyRead(raw),
@@ -1745,6 +1768,11 @@ const adaptGroupExperimental = (raw: RawClient["server.experimental"]) => ({
     delete: EndpointExperimentalArtifactsDelete(raw),
   },
   job: { list: EndpointExperimentalJobList(raw) },
+  a2a: {
+    card: EndpointExperimentalA2aCard(raw),
+    rpc: EndpointExperimentalA2aRpc(raw),
+    sessions: EndpointExperimentalA2aSessions(raw),
+  },
 })
 
 const EndpointShellList = (raw: RawClient["server.shell"]) => (input?: ShellListInput) =>

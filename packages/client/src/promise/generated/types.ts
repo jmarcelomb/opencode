@@ -2595,6 +2595,14 @@ export type ConfigEntry =
           artifacts?: boolean
           console_watches?: boolean
           mcp_events?: boolean
+          a2a?:
+            | boolean
+            | {
+                tokens?: Array<string>
+                peers?: Array<{ url: string; token?: string; name?: string }>
+                directory?: string
+                timeout?: string | false
+              }
           part_rows?: boolean
           image_generate?: boolean | { model?: string | { providerID: string; model: string; variant?: string } }
           subagent_depth?: number
@@ -4756,6 +4764,23 @@ export type ExperimentalJobListInput = {
 }
 
 export type ExperimentalJobListOutput = { data: Array<JobInfo> }["data"]
+
+export type ExperimentalA2aCardOutput = any
+
+export type ExperimentalA2aRpcInput = { readonly payload: unknown }
+
+export type ExperimentalA2aRpcOutput = any
+
+export type ExperimentalA2aSessionsInput = { readonly directory?: string | undefined }
+
+export type ExperimentalA2aSessionsOutput = {
+  data: Array<{
+    sessionID: SessionID
+    title?: string | undefined
+    a2aUrl: string
+    state: "idle" | "working" | "archived"
+  }>
+}["data"]
 
 export type ShellListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
 

@@ -187,6 +187,7 @@ function makeRoutes<AuthError, AuthServices>(
             PluginUpdate.Service,
             Project.Service,
             WellKnown.Service,
+            Config.Service,
           )(context),
         ),
         ServerInfo.layer(serviceURLs, Context.get(context, Global.Service).tmp, options.app),

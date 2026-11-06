@@ -52,4 +52,35 @@ export class Info extends Schema.Class<Info>("ConfigExperimental.Info")({
   policies: ConfigPolicy.Info.pipe(Schema.Array, optional).annotate({
     description: "Deprecated: use top-level policies. Ordered policies controlling access to configured resources",
   }),
+  a2a: Schema.Union([
+    Schema.Boolean,
+    Schema.Struct({
+      tokens: Schema.Array(Schema.String).pipe(optional).annotate({
+        description:
+          "Bearer tokens accepted by the inbound A2A endpoint. If empty, the endpoint accepts loopback requests only.",
+      }),
+      peers: Schema.Array(
+        Schema.Struct({
+          url: Schema.String,
+          token: Schema.String.pipe(optional),
+          name: Schema.String.pipe(optional),
+        }),
+      ).pipe(optional).annotate({
+        description: "Known external A2A peers for the a2a_discover and a2a_call tools.",
+      }),
+      directory: Schema.String.pipe(optional).annotate({
+        description:
+          "Working directory for sessions created by inbound A2A requests. Defaults to the server's process.cwd(). Peers can override per-message via metadata.opencode.directory.",
+      }),
+      timeout: Schema.Union([Schema.DurationFromString, Schema.Literal(false)]).pipe(optional).annotate({
+        description:
+          "Maximum time to wait for an inbound A2A task to complete before returning a failed state. Set to false to disable the timeout. Defaults to 10 minutes.",
+      }),
+    }),
+  ])
+    .pipe(optional)
+    .annotate({
+      description:
+        "A2A (Agent2Agent) protocol support. Experimental: may change without notice. Set to true to enable with defaults, or provide a struct for tokens and peer configuration.",
+    }),
 }) {}
