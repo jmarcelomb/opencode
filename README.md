@@ -39,6 +39,24 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
+> [!NOTE]
+> **This is a personal fork** of [anomalyco/opencode](https://github.com/anomalyco/opencode), tracking upstream. Everything not listed below matches upstream.
+
+## What this fork adds
+
+**A2A protocol v1.0 support.** OpenCode sessions act as A2A agents over HTTP. The server publishes an agent card at `/.well-known/agent-card.json` and accepts JSON-RPC `SendMessage` at `/api/experimental/a2a`. OpenCode maps each peer's `contextId` to a session ID in `~/.local/share/opencode/a2a.db`, so a remote peer such as a Hermes agent keeps one thread across calls instead of one-shot requests. A2A sessions run unattended and auto-allow every permission, so nobody has to approve their edits. When a thread's session is archived or deleted, the next message creates a fresh session that starts with a notice naming the earlier session, so the agent knows it continues prior work.
+
+Enable with `OPENCODE_FLAGS=a2a` or `experimental.a2a` in config; the local and dev channels have it on by default. Outbound peers are configured under `experimental.a2a.peers`.
+
+**Per-session auto-approve (yolo mode).** Each tab can flip between asking permission and auto-approving edits and commands. Run `/yolo` in the TUI, press `<leader>y`, or start with `opencode --yolo`. The setting applies per session, reverts on relaunch, and covers background tabs and subagent descendants. It never overrides an explicit `deny` rule. In headless `opencode run --yolo`, the runner auto-approves permission asks, cancels any question to the user, and tells the model to continue without an answer and state its assumptions, so autonomous runs never hang.
+
+**Smaller TUI conveniences:**
+- Thinking badge in the prompt metadata
+- `<leader>[` and `<leader>]` navigate between user messages
+- `<leader>o` goes back in tab history
+- `@` mentions complete across the whole filesystem
+- Clicking an inline image reveals its temp-file path
+
 [![OpenCode Terminal UI](services/site/public/v1/docs/assets/lander/screenshot.png)](https://opencode.ai)
 
 ---
