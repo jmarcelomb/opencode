@@ -39,7 +39,10 @@ const PermissionParams = {
     Flag.withDescription("Auto-approve permissions that are not explicitly denied"),
     Flag.withDefault(false),
   ),
-  yolo: Flag.Boolean("yolo").pipe(Flag.withDefault(false), Flag.withHidden),
+  yolo: Flag.Boolean("yolo").pipe(
+    Flag.withDescription("Alias for --auto: auto-approve permissions that are not explicitly denied"),
+    Flag.withDefault(false),
+  ),
   dangerouslySkipPermissions: Flag.Boolean("dangerously-skip-permissions").pipe(
     Flag.withDefault(false),
     Flag.withHidden,

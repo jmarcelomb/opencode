@@ -38,6 +38,26 @@ For questions about the terminal interface, command-line invocation, `run`,
 [CLI guide](https://opencode.ai/docs/cli) and the relevant page linked from
 that section.
 
+The TUI command and `opencode run` accept permission flags:
+`--auto` auto-approves permissions that are not explicitly denied, so edits
+and commands run without confirmation prompts. `--yolo` is an alias for
+`--auto`, and `--dangerously-skip-permissions` is a hidden alias with the
+same behavior. Without the flag, the TUI starts in the mode configured
+under `session.permissions` in `cli.json` (prompting by default); the
+`/yolo` slash command toggles auto-approval for the current tab at
+runtime.
+
+Auto-approval covers permission asks only. It does not answer questions,
+and it does not override an explicit `deny` rule. In non-interactive
+`opencode run`, any question to the user is cancelled: the model receives
+feedback to continue without an answer and state its assumptions, the run
+still exits 0, and other input requests fail the run with exit 1. In the
+TUI, a question dialog still waits for the user even in auto-accept mode.
+There is no automatic question handling for unattended API or A2A callers:
+an unanswered form pauses the session until a client replies to it via the
+HTTP API, so autonomous callers should prefer prompts that state their
+assumptions instead of asking.
+
 CLI and TUI preferences are separate from OpenCode's server and project
 configuration. They live in the global `~/.config/opencode/cli.json`, or
 `$XDG_CONFIG_HOME/opencode/cli.json` when `XDG_CONFIG_HOME` is set. There is no
