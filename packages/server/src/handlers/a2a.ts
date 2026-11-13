@@ -1,4 +1,5 @@
 import { Session } from "@opencode/core/session"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { Config } from "@opencode/core/config"
 import { Bus } from "@opencode/core/bus"
 import { Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
@@ -208,6 +209,7 @@ export const makeA2a = Effect.gen(function* () {
    */
   const resolveContext = async (contextId: string, directory?: string): Promise<Session.ID> => {
     const existing = await db.resolveContext(contextId)
+    let previous: { sessionID: Session.ID; archived: boolean } | undefined
     if (existing) {
       // Verify the session still exists and is not archived.
       const info = await run(
@@ -215,6 +217,7 @@ export const makeA2a = Effect.gen(function* () {
       )
       if (info && info.time.archived === undefined) return existing.sessionID as Session.ID
       // Session is gone or archived — create a fresh one for this context.
+      previous = { sessionID: existing.sessionID as Session.ID, archived: info !== undefined }
     }
 
     // Resolve directory: per-message metadata > config > process.cwd()
@@ -236,6 +239,24 @@ export const makeA2a = Effect.gen(function* () {
     } catch {
       // Permissions override failed; session still works for read-only tasks.
     }
+    if (previous) {
+      // The agent has no way to learn it continues an archived thread otherwise:
+      // the mapping moves to a fresh session and history does not carry over. Mirrors
+      // upstream's fork notice (packages/core/src/plugin/fork-notice.ts).
+      try {
+        await run(
+          session.synthetic({
+            sessionID: created.id as Session.ID,
+            id: SessionMessage.ID.make(`msg_a2a_continuation_${contextId}`),
+            text: continuationNotice(contextId, previous),
+            description: "A2A continuation notice",
+            resume: false,
+          }),
+        )
+      } catch {
+        // The notice is advisory; a failed injection must not break the new session.
+      }
+    }
     await db.saveContext({
       contextId,
       sessionID: created.id,
@@ -243,6 +264,15 @@ export const makeA2a = Effect.gen(function* () {
       createdAt: Date.now(),
     })
     return created.id
+  }
+
+  function continuationNotice(contextId: string, previous: { sessionID: Session.ID; archived: boolean }) {
+    return `<continuation-notice>
+This session continues an earlier conversation with the same remote peer (contextId ${contextId}). The previous session ${previous.sessionID} was ${previous.archived ? "archived" : "deleted"}, so this session starts with no history from it. The peer will send its next message shortly.
+- Work promised or started in the previous session did not carry over. Do not assume it finished or failed; check what already happened (files, git, PRs, CI) before continuing or redoing it.
+- Files, repositories and external services are shared with the previous session. Verify their current state before changing something it was working on.
+- Otherwise work normally: answer the peer's next message without extra questions, and do not mention the restart unless it changes the answer.
+</continuation-notice>`
   }
 
   /** Build the A2A Agent Card. */
