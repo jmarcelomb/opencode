@@ -2594,7 +2594,6 @@ export type ConfigEntry =
           schedules?: boolean
           artifacts?: boolean
           console_watches?: boolean
-          mcp_events?: boolean
           a2a?:
             | boolean
             | {
@@ -2603,6 +2602,7 @@ export type ConfigEntry =
                 directory?: string
                 timeout?: string | false
               }
+          mcp_events?: boolean
           part_rows?: boolean
           image_generate?: boolean | { model?: string | { providerID: string; model: string; variant?: string } }
           subagent_depth?: number
